@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IG Frame Editor</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:16px;max-width:900px;margin:auto}
+input,button{font:inherit;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#222;color:#eee}
+button{cursor:pointer}button:hover{background:#333}button.main{background:#c13584;border-color:#c13584}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}
+#url{flex:1;min-width:200px}video{width:100%;max-height:60vh;background:#000;border-radius:8px}
+#bar{position:relative;height:28px;background:#222;border-radius:6px;cursor:pointer}
+#sel{position:absolute;top:0;bottom:0;background:#c1358455}#head{position:absolute;top:0;bottom:0;width:2px;background:#fff}
+.mono{font-family:ui-monospace,monospace}#msg{color:#f88}small{color:#999}
+</style></head><body>
+<h2>🎞️ IG Frame Editor</h2>
+<div class="row"><input id="url" placeholder="https://www.instagram.com/reel/..."><button class="main" id="load">Cargar</button></div>
+<div id="msg"></div>
+<div id="ed" hidden>
+  <video id="v" controls preload="auto"></video>
+  <div id="bar"><div id="sel"></div><div id="head"></div></div>
+  <div class="row mono">Tiempo: <span id="t">0.000</span>s · Frame: <span id="f">0</span> · FPS: <span id="fps"></span></div>
+  <div class="row">
+    <button data-s="-10">⏪ -10</button><button data-s="-1">◀ -1 frame</button>
+    <button id="play">⏯</button>
+    <button data-s="1">+1 frame ▶</button><button data-s="10">+10 ⏩</button>
+  </div>
+  <div class="row">
+    <button id="setIn">[ Marcar inicio (I)</button><span class="mono" id="in">0.000</span>
+    <button id="setOut">Marcar fin (O) ]</button><span class="mono" id="out">0.000</span>
+    <button id="prev">▶ Ver recorte</button>
+    <button class="main" id="dl">⬇ Descargar MP4</button>
+  </div>
+  <small>Atajos: ← → frame a frame (Shift = 10 frames), Espacio play/pausa, I/O marcar inicio/fin.</small>
+</div>
+<script>
+const $=id=>document.getElementById(id), v=$('v');
+let vid, fps=30, dur=0, tin=0, tout=0, previewing=false;
+const msg=t=>$('msg').textContent=t||'';
+$('load').onclick=async()=>{
+  msg('Descargando…'); $('ed').hidden=true;
+  const r=await fetch('/api/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value})});
+  const j=await r.json(); if(!r.ok) return msg(j.error);
+  vid=j.id; fps=j.fps||30; dur=j.duration; tin=0; tout=dur;
+  v.src='/api/video/'+vid; $('fps').textContent=fps; $('ed').hidden=false; msg(); ui();
+};
+v.onloadedmetadata=()=>{ if(!dur){dur=v.duration;tout=dur;} ui(); };
+const step=n=>{ v.pause(); v.currentTime=Math.min(dur,Math.max(0,(Math.round(v.currentTime*fps)+n)/fps+0.0001)); };
+document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>step(+b.dataset.s));
+$('play').onclick=()=>v.paused?v.play():v.pause();
+$('setIn').onclick=()=>{tin=v.currentTime; if(tout<=tin) tout=dur; ui();};
+$('setOut').onclick=()=>{tout=v.currentTime; if(tout<=tin) tin=0; ui();};
+$('prev').onclick=()=>{previewing=true; v.currentTime=tin; v.play();};
+$('bar').onclick=e=>{const r=e.currentTarget.getBoundingClientRect(); v.currentTime=(e.clientX-r.left)/r.width*dur;};
+v.ontimeupdate=()=>{ if(previewing&&v.currentTime>=tout){v.pause();previewing=false;} ui(); };
+v.onseeked=ui;
+function ui(){
+  $('t').textContent=v.currentTime.toFixed(3); $('f').textContent=Math.round(v.currentTime*fps);
+  $('in').textContent=tin.toFixed(3); $('out').textContent=tout.toFixed(3);
+  if(dur){ $('sel').style.left=tin/dur*100+'%'; $('sel').style.width=(tout-tin)/dur*100+'%'; $('head').style.left=v.currentTime/dur*100+'%'; }
+}
+$('dl').onclick=async()=>{
+  msg('Procesando recorte…');
+  const r=await fetch('/api/trim/'+vid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start:tin,end:tout})});
+  if(!r.ok) return msg((await r.json()).error);
+  const a=document.createElement('a'); a.href=URL.createObjectURL(await r.blob()); a.download='recorte.mp4'; a.click(); msg();
+};
+document.onkeydown=e=>{
+  if(e.target.tagName==='INPUT'||$('ed').hidden) return;
+  const k=e.key, n=e.shiftKey?10:1;
+  if(k==='ArrowRight'){e.preventDefault();step(n);} else if(k==='ArrowLeft'){e.preventDefault();step(-n);}
+  else if(k===' '){e.preventDefault();$('play').click();} else if(k==='i'||k==='I') $('setIn').click();
+  else if(k==='o'||k==='O') $('setOut').click();
+};
+</script></body></html>
